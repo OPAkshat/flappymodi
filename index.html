@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Flappy Modi vs Trump</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            background-color: #70c5ce;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            max-width: 100%;
+            max-height: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+
+    <script>
+        // --- CONFIGURATION ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Game Variables
+        let frames = 0;
+        let score = 0;
+        let highScore = localStorage.getItem('flappyHighScore') || 0;
+        let currentState = 'LOBBY'; 
+        const GRAVITY = 0.25;
+        const JUMP = -4.6;
+
+        // --- ASSETS (No Waiting Strategy) ---
+        // We create the images, but we don't wait for them to load.
+        // The draw loop checks if they are ready every single frame.
+        
+        const imgBg = new Image(); imgBg.src = 'background.jpg';
+        const imgBird = new Image(); imgBird.src = 'modi.jpg';
+        const imgProj = new Image(); imgProj.src = 'trump.jpg';
+        const imgPipe = new Image(); imgPipe.src = 'pipe.jpg';
+
+        // Audio (Browser might block this until you click)
+        const audioMusic = new Audio('music.mp3'); audioMusic.loop = true; audioMusic.volume = 0.5;
+        const audioIntro = new Audio('intro.mp3'); audioIntro.loop = true;
+        const audioDie = new Audio('die.mp3');
+
+        // --- HELPER: Draw Image or Fallback Box ---
+        function drawAsset(img, x, y, w, h, fallbackColor, fallbackText) {
+            // Check if image is valid and loaded
+            if (img.complete && img.naturalWidth !== 0) {
+                ctx.drawImage(img, x, y, w, h);
+            } else {
+                // Fallback Box
+                ctx.fillStyle = fallbackColor;
+                ctx.fillRect(x, y, w, h);
+                if (fallbackText) {
+                    ctx.fillStyle = "white";
+                    ctx.font = "10px Arial";
+                    ctx.fillText(fallbackText, x + 5, y + h/2);
+                }
+            }
+        }
+
+        // --- AUDIO MANAGER ---
+        function playMusic(type) {
+            try {
+                audioIntro.pause(); audioIntro.currentTime = 0;
+                audioMusic.pause(); audioMusic.currentTime = 0;
+
+                if (type === 'lobby') audioIntro.play().catch(e => console.log("Click to play audio"));
+                if (type === 'game') audioMusic.play().catch(e => console.log("Click to play audio"));
+            } catch(e) {}
+        }
+
+        function playSound(sound) {
+            try { sound.currentTime = 0; sound.play().catch(e=>{}); } catch(e){}
+        }
+
+        // --- GAME OBJECTS ---
+
+        const bird = {
+            x: 50,
+            y: 150,
+            width: 50,
+            height: 65,
+            velocity: 0,
+            
+            draw: function() {
+                ctx.save();
+                ctx.translate(this.x + this.width/2, this.y + this.height/2);
+                let rotation = this.velocity * 0.1;
+                ctx.rotate(rotation);
+                
+                // Draw Modi
+                if (imgBird.complete && imgBird.naturalWidth !== 0) {
+                    ctx.drawImage(imgBird, -this.width/2, -this.height/2, this.width, this.height);
+                } else {
+                    ctx.fillStyle = "orange";
+                    ctx.fillRect(-this.width/2, -this.height/2, this.width, this.height);
+                }
+                ctx.restore();
+            },
+            
+            update: function() {
+                this.velocity += GRAVITY;
+                this.y += this.velocity;
+                if(this.y + this.height >= canvas.height) {
+                    this.y = canvas.height - this.height;
+                    gameOver();
+                }
+            },
+            jump: function() { this.velocity = JUMP; }
+        };
+
+        const pipes = {
+            items: [],
+            width: 70,
+            gap: 170,
+            dx: 3,
+            
+            update: function() {
+                if(frames % 100 === 0) {
+                    let topPos = -Math.floor(Math.random() * 300) - 100; 
+                    this.items.push({ x: canvas.width, y: topPos });
+                }
+
+                for(let i = 0; i < this.items.length; i++) {
+                    let p = this.items[i];
+                    p.x -= this.dx;
+
+                    let pipeHeight = 400; 
+                    let topPipeBottomY = p.y + pipeHeight;
+                    let bottomPipeTopY = topPipeBottomY + this.gap;
+
+                    // Collision
+                    if( bird.x + bird.width > p.x && 
+                        bird.x < p.x + this.width && 
+                        (bird.y < topPipeBottomY || bird.y + bird.height > bottomPipeTopY)) {
+                        gameOver();
+                    }
+
+                    if(p.x + this.width <= 0) {
+                        this.items.shift();
+                        score++;
+                        i--;
+                    }
+                }
+            },
+            
+            draw: function() {
+                for(let i = 0; i < this.items.length; i++) {
+                    let p = this.items[i];
+                    let pipeHeight = 400;
+                    let topPipeBottom = p.y + pipeHeight;
+                    let bottomPipeY = topPipeBottom + this.gap;
+                    
+                    // Draw Pipe Asset or Green Box
+                    if(imgPipe.complete && imgPipe.naturalWidth !== 0) {
+                        // Top (Flip)
+                        ctx.save();
+                        ctx.translate(p.x + this.width/2, topPipeBottom); 
+                        ctx.scale(1, -1);
+                        ctx.drawImage(imgPipe, -this.width/2, 0, this.width, pipeHeight);
+                        ctx.restore();
+                        // Bottom
+                        ctx.drawImage(imgPipe, p.x, bottomPipeY, this.width, pipeHeight);
+                    } else {
+                        // Fallback
+                        ctx.fillStyle = "#00c800";
+                        ctx.fillRect(p.x, 0, this.width, topPipeBottom);
+                        ctx.fillRect(p.x, bottomPipeY, this.width, canvas.height - bottomPipeY);
+                        ctx.strokeStyle = "#004400";
+                        ctx.lineWidth = 3;
+                        ctx.strokeRect(p.x, 0, this.width, topPipeBottom);
+                        ctx.strokeRect(p.x, bottomPipeY, this.width, canvas.height - bottomPipeY);
+                    }
+                }
+            }
+        };
+
+        const projectiles = {
+            items: [],
+            update: function() {
+                if(frames % 150 === 0) {
+                    this.items.push({
+                        x: canvas.width,
+                        y: Math.random() * (canvas.height - 100) + 50,
+                        w: 45, h: 55, speed: Math.random() * 3 + 4
+                    });
+                }
+
+                for(let i = 0; i < this.items.length; i++) {
+                    let p = this.items[i];
+                    p.x -= p.speed;
+                    
+                    if (bird.x < p.x + p.w && bird.x + bird.width > p.x &&
+                        bird.y < p.y + p.h && bird.y + bird.height > p.y) {
+                        gameOver();
+                    }
+
+                    if(p.x + p.w < 0) { this.items.shift(); i--; }
+                }
+            },
+            draw: function() {
+                for(let i = 0; i < this.items.length; i++) {
+                    let p = this.items[i];
+                    drawAsset(imgProj, p.x, p.y, p.w, p.h, "red", "TRUMP");
+                }
+            }
+        };
+
+        function init() {
+            bird.y = 150; bird.velocity = 0;
+            pipes.items = []; projectiles.items = [];
+            score = 0; frames = 0;
+            currentState = 'PLAYING';
+            playMusic('game');
+        }
+
+        // --- MAIN LOOP (Runs Immediately) ---
+        function loop() {
+            if(currentState === 'PLAYING') {
+                bird.update(); pipes.update(); projectiles.update(); frames++;
+            }
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        function draw() {
+            // Background
+            if(imgBg.complete && imgBg.naturalWidth !== 0) {
+                ctx.drawImage(imgBg, 0, 0, canvas.width, canvas.height);
+            } else {
+                ctx.fillStyle = "#70c5ce";
+                ctx.fillRect(0,0, canvas.width, canvas.height);
+            }
+
+            pipes.draw(); projectiles.draw(); bird.draw();
+
+            // UI Overlays
+            if(currentState === 'LOBBY') {
+                ctx.fillStyle = "rgba(0,0,0,0.6)";
+                ctx.fillRect(0,0, canvas.width, canvas.height);
+                ctx.fillStyle = "#FFD700";
+                ctx.font = "bold 40px Arial";
+                ctx.textAlign = "center";
+                ctx.fillText("FLAPPY MODI", canvas.width/2, 200);
+                ctx.fillStyle = "white";
+                ctx.font = "20px Arial";
+                ctx.fillText("Click / Tap to Start", canvas.width/2, 260);
+                ctx.fillText("High Score: " + highScore, canvas.width/2, 320);
+                
+                // Warning text if assets failed
+                if(!imgBird.complete || imgBird.naturalWidth === 0) {
+                    ctx.font = "12px Arial";
+                    ctx.fillStyle = "#ffaaaa";
+                    ctx.fillText("(Images blocked by browser? Using fallback boxes)", canvas.width/2, 580);
+                }
+            } else if (currentState === 'GAMEOVER') {
+                ctx.fillStyle = "rgba(0,0,0,0.6)";
+                ctx.fillRect(0,0, canvas.width, canvas.height);
+                ctx.fillStyle = "red";
+                ctx.font = "bold 40px Arial";
+                ctx.textAlign = "center";
+                ctx.fillText("GAME OVER", canvas.width/2, 250);
+                ctx.fillStyle = "white";
+                ctx.font = "30px Arial";
+                ctx.fillText("Score: " + score, canvas.width/2, 300);
+                ctx.font = "20px Arial";
+                ctx.fillText("Click to Restart", canvas.width/2, 350);
+            } else {
+                // Score
+                ctx.fillStyle = "white";
+                ctx.strokeStyle = "black";
+                ctx.lineWidth = 3;
+                ctx.font = "bold 40px Arial";
+                ctx.textAlign = "left";
+                ctx.strokeText(score, 20, 50);
+                ctx.fillText(score, 20, 50);
+            }
+        }
+
+        function gameOver() {
+            currentState = 'GAMEOVER';
+            playSound(audioDie);
+            playMusic('stop');
+            if(score > highScore) {
+                highScore = score;
+                localStorage.setItem('flappyHighScore', highScore);
+            }
+        }
+
+        // --- INPUTS ---
+        const handleInput = () => {
+            // This interaction unlocks audio context
+            if(currentState === 'LOBBY') {
+                playMusic('lobby'); // Try to kickstart audio context
+                init();
+            }
+            else if(currentState === 'PLAYING') bird.jump();
+            else if(currentState === 'GAMEOVER') { currentState = 'LOBBY'; playMusic('lobby'); }
+        };
+        window.addEventListener("keydown", (e) => { if(e.code === "Space") handleInput(); });
+        window.addEventListener("touchstart", (e) => { e.preventDefault(); handleInput(); });
+        window.addEventListener("mousedown", handleInput);
+
+        // START GAME IMMEDIATELY
+        loop();
+
+    </script>
+</body>
+</html>
